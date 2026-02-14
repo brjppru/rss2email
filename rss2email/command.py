@@ -246,21 +246,29 @@ def opmlexport(feeds, args):
 
 def check_subscribe(feeds, args):
     "Check the availability of all subscribed feeds and send email report."
-    headers = {
-        'User-Agent': 'rss2email/{} (https://github.com/rss2email/rss2email)'.format(
-            feeds.config['DEFAULT'].get('user-agent', 'rss2email'))
-    }
-    timeout_seconds = 15
-    
+    timeout_seconds = feeds.config['DEFAULT'].getint('feed-timeout', fallback=15)
+
+    def _cfg_get(section, option, fallback=''):
+        try:
+            return feeds.config.get(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
+    def _cfg_getboolean(section, option, fallback=False):
+        try:
+            return feeds.config.getboolean(section, option, fallback=fallback)
+        except Exception:
+            return fallback
+
     _LOG.info('Checking availability of {} feeds'.format(len(feeds)))
-    
+
     if not args.index:
         args.index = range(len(feeds))
-    
+
     # Store results for email report
     problem_feeds = []
     successful_feeds = []
-    
+
     for index in args.index:
         feed = feeds.index(index)
         if not feed.url:
@@ -272,23 +280,43 @@ def check_subscribe(feeds, args):
                 'message': 'No URL configured'
             })
             continue
-            
+
         _LOG.info('Checking feed: {} ({})'.format(feed.name, feed.url))
-        
+
+        user_agent = _cfg_get(
+            feed.section,
+            'user-agent',
+            fallback=_cfg_get('DEFAULT', 'user-agent', fallback='rss2email')
+        )
+        proxy = _cfg_get(feed.section, 'proxy', fallback='').strip()
+        ignore_ssl_errors = _cfg_getboolean(
+            feed.section,
+            'ignore-ssl-errors',
+            fallback=_cfg_getboolean('DEFAULT', 'ignore-ssl-errors', fallback=False)
+        )
+
+        request_kwargs = {
+            'headers': {'User-Agent': user_agent},
+            'timeout': timeout_seconds,
+            'allow_redirects': True,
+        }
+        if proxy:
+            request_kwargs['proxies'] = {
+                'http': proxy,
+                'https': proxy,
+            }
+        if ignore_ssl_errors:
+            request_kwargs['verify'] = False
+
         try:
-            response = _requests.get(
-                feed.url, 
-                headers=headers, 
-                timeout=timeout_seconds, 
-                allow_redirects=True
-            )
-            
+            response = _requests.get(feed.url, **request_kwargs)
+
             # Check for redirects
             if response.history:
                 final_url = response.url
                 _LOG.info('[{}] {} -> REDIRECT TO: {}'.format(
                     feed.name, feed.url, final_url))
-            
+
             # Check response status
             if response.status_code == 200:
                 if response.content:
@@ -326,7 +354,7 @@ def check_subscribe(feeds, args):
                     'status': str(response.status_code),
                     'message': 'ERROR - Status {}: {}'.format(response.status_code, response.reason)
                 })
-                    
+
         except _requests.exceptions.Timeout:
             error_msg = 'ERROR - Request timeout ({} seconds)'.format(timeout_seconds)
             _LOG.error('[{}] {}'.format(feed.name, error_msg))
@@ -372,11 +400,11 @@ def check_subscribe(feeds, args):
                 'status': 'UnexpectedError',
                 'message': error_msg
             })
-    
+
     # Send email report if there are problems
     if problem_feeds:
         _send_availability_report(feeds, problem_feeds, [])
-    
+
     _LOG.info('Feed availability check completed')
     _LOG.info('Found {} problematic feeds, {} successful feeds'.format(
         len(problem_feeds), len(successful_feeds)))
