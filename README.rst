@@ -174,6 +174,51 @@ following to your configuration file::
 You can make the email address whatever you want, but your mail server
 requires that the ``yoursite.com`` part actually exists.
 
+Subject Sanitization
+-------------------
+
+If you're experiencing issues with UTF-8 characters in email subjects, you can enable subject sanitization to remove unwanted characters::
+
+  sanitize-subject = True
+
+By default, this will retain only Russian, English, and Kazakh letters, digits, spaces, and common punctuation. You can customize which characters to keep by modifying the sanitization pattern::
+
+  subject-sanitization-regex = [^a-zA-Zа-яА-Я0-9\s.,!?:;()\[\]{}"'«»\-–—]
+
+This regex pattern specifies which characters to remove (the ``^`` at the beginning means "not these characters"). You can adjust it to include characters from other languages as needed.
+
+To use this feature, you'll also need to set up the post-processing hook::
+
+  post-process = rss2email.post_process.sanitize_subject sanitize
+
+Feed Availability Check
+-----------------------
+
+You can check the availability of your subscribed feeds using the ``check-subscribe`` command::
+
+  r2e check-subscribe
+
+This command will test all your subscribed feeds and report their status, including:
+- HTTP response codes
+- Redirects
+- Connection errors
+- Timeouts
+- Content validation (ensures response is actually RSS/Atom format)
+
+You can also check specific feeds by providing their indices::
+
+  r2e check-subscribe 0 1 2
+
+**Email Reports**: If any feeds have problems (non-200 status codes, timeouts, connection errors, or non-RSS/Atom content), the command will automatically send an email report to your configured email address. The email will include:
+- Subject with timestamp in format "RSS Feed Availability Report - YYYY-MM-DD HH:MM:SS"
+- List of problematic feeds with detailed error information
+- Only sends email when there are actual problems - successful feeds (including those with redirects) don't trigger emails
+- Redirects are logged to console but don't appear in email reports
+
+**Content Validation**: The command now validates that responses with 200 status codes actually contain RSS or Atom content. If a server returns 200 but serves HTML, plain text, or other non-feed content, it will be flagged as problematic.
+
+This is useful for troubleshooting feed issues and ensuring your subscriptions are working correctly.
+
 
 SMTP
 ----

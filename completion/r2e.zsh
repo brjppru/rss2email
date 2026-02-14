@@ -15,6 +15,7 @@ __r2e_command(){
     'unpause:Unpause a feed (enable fetching)'
     'delete:Remove a feed from the database'
     'reset:Forget dynamic feed data (e.g. to re-send old entries)'
+    'check-subscribe:Check the availability of subscribed feeds'
     'opmlimport:Import configuration from OPML'
     'opmlexport:Export configuration to OPML'
   )

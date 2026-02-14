@@ -114,6 +114,9 @@ CONFIG['DEFAULT'] = _collections.OrderedDict((
         ('feed-timeout', str(60)),
         # Set the sleep interval (in seconds) between consecutive fetches from the same server
         ('same-server-fetch-interval', str(0)),
+        # True: Ignore SSL certificate verification errors when fetching feeds
+        # False: Verify SSL certificates (default, secure)
+        ('ignore-ssl-errors', str(False)),
 
         ### Processing
         # True: Fetch, process, and email feeds.
@@ -164,6 +167,12 @@ CONFIG['DEFAULT'] = _collections.OrderedDict((
         # The format for the Subject line.  Available attributes are
         # 'feed', 'feed-name', 'feed-url', 'feed-title'.
         ('subject-format', '{feed-title}'),
+        # True: Sanitize email subjects by removing unwanted characters.
+        # False: Leave email subjects as-is.
+        ('sanitize-subject', str(False)),
+        # Regex pattern specifying which characters to remove from subjects.
+        # Default keeps only Russian, English, and Kazakh letters, digits, spaces, and punctuation.
+        ('subject-sanitization-regex', r'[^a-zA-Zа-яА-ЯәғқңөұүһіӘҒҚҢӨҰҮҺІ0-9 .,!?:;()[\]{}"\'«»\-–—]'),
 
         ## HTML conversion
         # True: Send text/html messages when possible.

@@ -42,3 +42,5 @@ standard post-processing hook, however ``entry`` and ``guid`` are
 replaced by ``seen``, a list of ``(guid, id_)`` tuples for each entry
 part contained in the digest message.
 """
+
+from . import sanitize_subject

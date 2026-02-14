@@ -150,6 +150,13 @@ def run(*args, **kwargs):
         'index', nargs='*',
         help='feeds to reset (defaults to resetting all feeds)')
 
+    check_subscribe_parser = subparsers.add_parser(
+        'check-subscribe', help=_command.check_subscribe.__doc__.splitlines()[0])
+    check_subscribe_parser.set_defaults(func=_command.check_subscribe)
+    check_subscribe_parser.add_argument(
+        'index', nargs='*',
+        help='feeds to check (defaults to checking all feeds)')
+
     opmlimport_parser = subparsers.add_parser(
         'opmlimport', help=_command.opmlimport.__doc__.splitlines()[0])
     opmlimport_parser.set_defaults(func=_command.opmlimport)

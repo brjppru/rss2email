@@ -36,9 +36,41 @@ import xml.dom.minidom as _minidom
 import xml.sax.saxutils as _saxutils
 import urllib as _urllib
 import time as _time
+import requests as _requests
+import email.message as _email_message
+from datetime import datetime as _datetime
 
 from . import LOG as _LOG
 from . import error as _error
+
+def _is_rss_or_atom_content(content):
+    """Check if content appears to be RSS or Atom feed."""
+    if not content:
+        return False
+    
+    content_str = content.decode('utf-8', errors='ignore').lower()
+    
+    # Check for RSS indicators
+    rss_indicators = [
+        '<rss',
+        '<rdf:rdf',
+        'xmlns:rss',
+        'xmlns:rdf'
+    ]
+    
+    # Check for Atom indicators
+    atom_indicators = [
+        '<feed',
+        'xmlns:atom',
+        'xmlns="http://www.w3.org/2005/atom"'
+    ]
+    
+    # Check for either RSS or Atom
+    for indicator in rss_indicators + atom_indicators:
+        if indicator in content_str:
+            return True
+    
+    return False
 
 def new(feeds, args):
     "Create a new feed database."
@@ -211,3 +243,197 @@ def opmlexport(feeds, args):
         b'</opml>\n')
     if args.file:
         f.close()
+
+def check_subscribe(feeds, args):
+    "Check the availability of all subscribed feeds and send email report."
+    headers = {
+        'User-Agent': 'rss2email/{} (https://github.com/rss2email/rss2email)'.format(
+            feeds.config['DEFAULT'].get('user-agent', 'rss2email'))
+    }
+    timeout_seconds = 15
+    
+    _LOG.info('Checking availability of {} feeds'.format(len(feeds)))
+    
+    if not args.index:
+        args.index = range(len(feeds))
+    
+    # Store results for email report
+    problem_feeds = []
+    successful_feeds = []
+    
+    for index in args.index:
+        feed = feeds.index(index)
+        if not feed.url:
+            _LOG.warning('[{}] No URL configured'.format(feed.name))
+            problem_feeds.append({
+                'name': feed.name,
+                'url': 'No URL configured',
+                'status': 'No URL',
+                'message': 'No URL configured'
+            })
+            continue
+            
+        _LOG.info('Checking feed: {} ({})'.format(feed.name, feed.url))
+        
+        try:
+            response = _requests.get(
+                feed.url, 
+                headers=headers, 
+                timeout=timeout_seconds, 
+                allow_redirects=True
+            )
+            
+            # Check for redirects
+            if response.history:
+                final_url = response.url
+                _LOG.info('[{}] {} -> REDIRECT TO: {}'.format(
+                    feed.name, feed.url, final_url))
+            
+            # Check response status
+            if response.status_code == 200:
+                if response.content:
+                    # Check if content is actually RSS/Atom
+                    if _is_rss_or_atom_content(response.content):
+                        _LOG.info('[{}] OK - Status 200, RSS/Atom content available'.format(feed.name))
+                        successful_feeds.append({
+                            'name': feed.name,
+                            'url': feed.url,
+                            'status': '200',
+                            'message': 'OK - Status 200, RSS/Atom content available'
+                        })
+                    else:
+                        _LOG.warning('[{}] WARNING - Status 200, but content is not RSS/Atom'.format(feed.name))
+                        problem_feeds.append({
+                            'name': feed.name,
+                            'url': feed.url,
+                            'status': '200',
+                            'message': 'WARNING - Status 200, but content is not RSS/Atom format'
+                        })
+                else:
+                    _LOG.warning('[{}] WARNING - Status 200, but content is empty'.format(feed.name))
+                    problem_feeds.append({
+                        'name': feed.name,
+                        'url': feed.url,
+                        'status': '200',
+                        'message': 'WARNING - Status 200, but content is empty'
+                    })
+            else:
+                _LOG.error('[{}] ERROR - Status {}: {}'.format(
+                    feed.name, response.status_code, response.reason))
+                problem_feeds.append({
+                    'name': feed.name,
+                    'url': feed.url,
+                    'status': str(response.status_code),
+                    'message': 'ERROR - Status {}: {}'.format(response.status_code, response.reason)
+                })
+                    
+        except _requests.exceptions.Timeout:
+            error_msg = 'ERROR - Request timeout ({} seconds)'.format(timeout_seconds)
+            _LOG.error('[{}] {}'.format(feed.name, error_msg))
+            problem_feeds.append({
+                'name': feed.name,
+                'url': feed.url,
+                'status': 'Timeout',
+                'message': error_msg
+            })
+        except _requests.exceptions.TooManyRedirects:
+            error_msg = 'ERROR - Too many redirects'
+            _LOG.error('[{}] {}'.format(feed.name, error_msg))
+            problem_feeds.append({
+                'name': feed.name,
+                'url': feed.url,
+                'status': 'TooManyRedirects',
+                'message': error_msg
+            })
+        except _requests.exceptions.ConnectionError as e:
+            error_msg = 'ERROR - Connection error: {}'.format(e)
+            _LOG.error('[{}] {}'.format(feed.name, error_msg))
+            problem_feeds.append({
+                'name': feed.name,
+                'url': feed.url,
+                'status': 'ConnectionError',
+                'message': error_msg
+            })
+        except _requests.exceptions.RequestException as e:
+            error_msg = 'ERROR - Request error: {}'.format(e)
+            _LOG.error('[{}] {}'.format(feed.name, error_msg))
+            problem_feeds.append({
+                'name': feed.name,
+                'url': feed.url,
+                'status': 'RequestError',
+                'message': error_msg
+            })
+        except Exception as e:
+            error_msg = 'ERROR - Unexpected error: {} - {}'.format(type(e).__name__, e)
+            _LOG.error('[{}] {}'.format(feed.name, error_msg))
+            problem_feeds.append({
+                'name': feed.name,
+                'url': feed.url,
+                'status': 'UnexpectedError',
+                'message': error_msg
+            })
+    
+    # Send email report if there are problems
+    if problem_feeds:
+        _send_availability_report(feeds, problem_feeds, [])
+    
+    _LOG.info('Feed availability check completed')
+    _LOG.info('Found {} problematic feeds, {} successful feeds'.format(
+        len(problem_feeds), len(successful_feeds)))
+
+def _send_availability_report(feeds, problem_feeds, successful_feeds):
+    """Send email report about feed availability issues."""
+    try:
+        # Get current timestamp
+        now = _datetime.now()
+        timestamp = now.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Create email message
+        message = _email_message.EmailMessage()
+        
+        # Set subject with timestamp
+        subject = 'RSS Feed Availability Report - {}'.format(timestamp)
+        message['Subject'] = subject
+        
+        # Set From header
+        from_addr = feeds.config['DEFAULT'].get('from', 'rss2email@rss2email.invalid')
+        message['From'] = from_addr
+        
+        # Set To header (use default email)
+        to_addr = feeds.config['DEFAULT'].get('to', '')
+        if to_addr:
+            message['To'] = to_addr
+        
+        # Create email body
+        body_lines = []
+        body_lines.append('RSS Feed Availability Report')
+        body_lines.append('Generated: {}'.format(timestamp))
+        body_lines.append('')
+        body_lines.append('PROBLEMATIC FEEDS ({}):'.format(len(problem_feeds)))
+        body_lines.append('=' * 50)
+        
+        for feed in problem_feeds:
+            body_lines.append('')
+            body_lines.append('Feed: {}'.format(feed['name']))
+            body_lines.append('URL: {}'.format(feed['url']))
+            body_lines.append('Status: {}'.format(feed['status']))
+            body_lines.append('Message: {}'.format(feed['message']))
+            body_lines.append('-' * 30)
+        
+        body_lines.append('')
+        body_lines.append('End of report')
+        
+        # Set email body
+        message.set_content('\n'.join(body_lines))
+        
+        # Send email using the same method as regular feeds
+        _LOG.info('Sending availability report email to {}'.format(to_addr))
+        
+        # Use the same email sending mechanism as regular feeds
+        from . import email as _email_module
+        _email_module.send(recipient=to_addr, message=message, config=feeds.config)
+        
+        _LOG.info('Availability report email sent successfully')
+        
+    except Exception as e:
+        _LOG.error('Failed to send availability report email: {}'.format(e))

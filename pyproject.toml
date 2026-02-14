@@ -9,6 +9,7 @@ license = "GPL-2.0-only"
 python = "^3.6"
 feedparser = ">=6.0.5"
 html2text = ">=2020.1.16"
+requests = ">=2.25.0"
 
 [tool.poetry.group.dev.dependencies]
 update-copyright = ">=0.6.2"

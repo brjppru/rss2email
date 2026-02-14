@@ -64,6 +64,7 @@ import hashlib as _hashlib
 import html.parser as _html_parser
 import re as _re
 import socket as _socket
+import ssl as _ssl
 import time as _time
 import urllib.request as _urllib_request
 import uuid as _uuid
@@ -216,6 +217,7 @@ class Feed (object):
         'links_after_each_paragraph',
         'use_smtp',
         'smtp_ssl',
+        'sanitize_subject',
         ]
 
     _integer_attributes = [
@@ -378,11 +380,24 @@ class Feed (object):
             config = self.config['DEFAULT']
         proxy = config['proxy']
         timeout = config.getint('feed-timeout')
+        ignore_ssl_errors = config.getboolean('ignore-ssl-errors', fallback=False)
         kwargs = {}
+        handlers = []
         if proxy:
-            kwargs['handlers'] = [
+            handlers.append(
                 _urllib_request.ProxyHandler({ 'http': proxy, 'https': proxy })
-            ]
+            )
+        if ignore_ssl_errors:
+            # Create SSL context that ignores certificate verification errors
+            ssl_context = _ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = _ssl.CERT_NONE
+            handlers.append(
+                _urllib_request.HTTPSHandler(context=ssl_context)
+            )
+            _LOG.warning('SSL certificate verification disabled for {}'.format(self))
+        if handlers:
+            kwargs['handlers'] = handlers
         f = _util.TimeLimitedFunction('feed {}'.format(self.name), timeout, _feedparser.parse)
         return f(self.url, self.etag, modified=self.modified, agent=self.user_agent, **kwargs)
 
@@ -828,6 +843,10 @@ class Feed (object):
                 '<!DOCTYPE html>',
                 '<html>',
                 '  <head>',
+                '    <meta charset="UTF-8">',
+                '    <meta name="viewport" content="width=device-width, initial-scale=1.0">',
+                '    <meta name="color-scheme" content="light dark">',
+                '    <meta name="supported-color-schemes" content="light dark">',
                 ]
             if self.use_css and self.css:
                 lines.extend([

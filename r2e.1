@@ -113,6 +113,19 @@ Forget dynamic feed data (e.g. to re-send old entries).  The
 \fI<index>\fR option selects the feed(s) to reset (see \fBrun\fR for
 possible values).  If no \fI<index>\fR is given, all feeds are reset.
 .TP
+.B check-subscribe \fR[\fI<index>\fR [\fI<index>\fR ...]]
+Check the availability of subscribed feeds. This command tests all
+subscribed feeds and reports their status, including HTTP response codes,
+redirects, connection errors, timeouts, and content validation. The \fI<index>\fR option
+selects specific feeds to check (see \fBrun\fR for possible values).
+If no \fI<index>\fR is given, all feeds are checked.
+.P
+If any feeds have problems (non-200 status codes, timeouts, connection errors,
+or non-RSS/Atom content), the command will automatically send an email report
+to your configured email address with a timestamp in the subject and detailed
+information about problematic feeds only. Successful feeds (including redirects)
+are logged to console but don't appear in email reports.
+.TP
 .B opmlimport \fR[\fI<path>\fR]
 Import new feeds from OPML.  \fI<path>\fR is the file from which the
 OPML data will be read.  If \fI<path>\fR is not given \fBr2e\fR reads
