@@ -835,6 +835,112 @@ class Feed (object):
             return contents[0]
         return {'type': 'text/plain', 'value': ''}
 
+    def _remove_html_attributes(self, attrs, names):
+        removed = False
+        for name in names:
+            pattern = _re.compile(
+                r'\s+{}\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s"\'>/]+)'.format(
+                    _re.escape(name)),
+                _re.IGNORECASE | _re.DOTALL)
+            attrs, count = pattern.subn('', attrs)
+            if count:
+                removed = True
+        return attrs, removed
+
+    def _normalize_style_attribute(self, attrs, remove_names, add_declarations, force=False):
+        style_match = _re.search(
+            r'(?P<prefix>\sstyle\s*=\s*)(?P<quote>["\'])(?P<value>.*?)(?P=quote)',
+            attrs, flags=_re.IGNORECASE | _re.DOTALL)
+        remove_names = {name.lower() for name in remove_names}
+
+        if style_match:
+            declarations = []
+            removed = False
+            for declaration in style_match.group('value').split(';'):
+                declaration = declaration.strip()
+                if not declaration:
+                    continue
+                if ':' not in declaration:
+                    declarations.append(declaration)
+                    continue
+                key, value = declaration.split(':', 1)
+                key = key.strip()
+                if key.lower() in remove_names:
+                    removed = True
+                    continue
+                declarations.append('{}: {}'.format(key, value.strip()))
+            if not (force or removed):
+                return attrs, False
+            declarations.extend(add_declarations)
+            style_value = '; '.join(declarations)
+            if style_value and not style_value.endswith(';'):
+                style_value += ';'
+            style_attribute = '{prefix}{quote}{value}{quote}'.format(
+                prefix=style_match.group('prefix'),
+                quote=style_match.group('quote'),
+                value=style_value)
+            attrs = ''.join([
+                attrs[:style_match.start()],
+                style_attribute,
+                attrs[style_match.end():],
+            ])
+            return attrs, True
+
+        if not force:
+            return attrs, False
+
+        style_value = '; '.join(add_declarations)
+        if style_value and not style_value.endswith(';'):
+            style_value += ';'
+        attrs = attrs.rstrip()
+        if attrs:
+            attrs += ' '
+        attrs += 'style="{}"'.format(style_value)
+        return attrs, True
+
+    def _normalize_html_for_email(self, html):
+        tag_pattern = _re.compile(
+            r'<(?P<tag>img|div|p|figure|table|td|span|section)\b(?P<attrs>[^<>]*?)(?P<closing>\s*/?)>',
+            flags=_re.IGNORECASE | _re.DOTALL)
+
+        def replace_tag(match):
+            tag = match.group('tag')
+            tag_name = tag.lower()
+            attrs = match.group('attrs')
+            closing = match.group('closing') or ''
+
+            if tag_name == 'img':
+                attrs, _ = self._remove_html_attributes(attrs, ('width', 'height'))
+                attrs, _ = self._normalize_style_attribute(
+                    attrs,
+                    remove_names=(
+                        'width', 'min-width', 'max-width',
+                        'height', 'min-height', 'max-height'),
+                    add_declarations=(
+                        'max-width: 95% !important',
+                        'width: auto !important',
+                        'height: auto !important',
+                        'display: block',
+                    ),
+                    force=True)
+                return '<{}{}{}>'.format(tag, attrs, closing)
+
+            attrs, removed_width_attr = self._remove_html_attributes(attrs, ('width',))
+            attrs, changed_style = self._normalize_style_attribute(
+                attrs,
+                remove_names=('width', 'min-width', 'max-width'),
+                add_declarations=(
+                    'max-width: 95% !important',
+                    'width: auto !important',
+                    'box-sizing: border-box',
+                ),
+                force=removed_width_attr)
+            if not (removed_width_attr or changed_style):
+                return match.group(0)
+            return '<{}{}{}>'.format(tag, attrs, closing)
+
+        return tag_pattern.sub(replace_tag, html)
+
     def _process_entry_content(self, entry, content, subject):
         "Convert entry content to the requested format."
         link = self._get_entry_link(entry)
@@ -869,7 +975,8 @@ class Feed (object):
                     '<div class="body" id="body">',
                     ])
             if content['type'] in ('text/html', 'application/xhtml+xml'):
-                lines.append(content['value'].strip())
+                html_content = self._normalize_html_for_email(content['value'].strip())
+                lines.append(html_content)
             else:
                 lines.append(_saxutils.escape(content['value'].strip()))
             lines.append('</div>')
