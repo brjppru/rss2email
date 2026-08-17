@@ -550,6 +550,9 @@ class Feed (object):
                 ('X-RSS-ID', guid),
                 ('X-RSS-URL', self._get_entry_link(entry)),
                 ('X-RSS-TAGS', self._get_entry_tags(entry)),
+                ('X-R2E-Feed-Name', self.name),
+                ('X-R2E-Post-Key', self._get_post_key(guid)),
+                ('X-R2E-Sent', _formatdate(localtime=True)),
                 ))
         # remove empty tags, etc.
         keys = {k for k, v in extra_headers.items() if v is None}
@@ -583,6 +586,23 @@ class Feed (object):
             section=self.section)
 
         return guid, new_state, sender, message
+
+    _POST_KEY_TELEGRAM = _re.compile(
+        r'^https?://t\.me/(?:s/)?([^/]+)/(\d+)/?$')
+
+    def _get_post_key(self, guid) -> str:
+        """Stable key for an entry, independent of the link form.
+
+        RSSHub serves the same Telegram post as ``t.me/<channel>/<id>``
+        without an MTProto session and as ``t.me/s/<channel>/<id>`` with
+        one, so switching the session makes every entry look new.  This key
+        stays the same in both cases and lets one IMAP SEARCH find every
+        copy of a post.  Non-Telegram guids are returned unchanged.
+        """
+        match = self._POST_KEY_TELEGRAM.match(guid or '')
+        if match:
+            return 'tg:{}/{}'.format(match.group(1).lower(), match.group(2))
+        return guid
 
     def _get_uid_for_entry(self, entry) -> str:
         """Get the best UID (unique ID) for the entry."""
