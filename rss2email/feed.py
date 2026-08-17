@@ -604,6 +604,29 @@ class Feed (object):
             return 'tg:{}/{}'.format(match.group(1).lower(), match.group(2))
         return guid
 
+    _TELEGRAM_PREVIEW_LINK = _re.compile(
+        r'^(https?://t\.me)/s/([^/?#]+/\d+)/?$')
+
+    def _normalize_telegram_link(self, url: Optional[str]) -> Optional[str]:
+        """Rewrite a Telegram web-preview link into the app form.
+
+        With an MTProto session RSSHub links every post as
+        ``t.me/s/<channel>/<id>``.  That form is the web preview: it opens
+        in a browser and never hands the post over to the Telegram client.
+        The ``t.me/<channel>/<id>`` form, which RSSHub serves without a
+        session, does open the client, so the ``/s/`` prefix is dropped
+        here.  Everything else is returned unchanged, including
+        channel-level (``t.me/s/<channel>``) and search
+        (``t.me/s/<channel>?q=...``) links, where the preview form is the
+        only one that works.
+        """
+        if not url:
+            return url
+        match = self._TELEGRAM_PREVIEW_LINK.match(url)
+        if match:
+            return '{}/{}'.format(match.group(1), match.group(2))
+        return url
+
     def _get_uid_for_entry(self, entry) -> str:
         """Get the best UID (unique ID) for the entry."""
         if self.trust_link:
@@ -634,11 +657,14 @@ class Feed (object):
         id_ = getattr(entry, 'id', None)
         # Newer versions of feedparser could return a dictionary
         if isinstance(id_, dict):
-            return next(iter(id_.values()), None)
-        return id_
+            id_ = next(iter(id_.values()), None)
+        # The guid is normalized as well, not just the visible link: it is
+        # what lands in "seen", so keeping one form makes an entry survive
+        # RSSHub switching between MTProto and plain HTTP.
+        return self._normalize_telegram_link(id_)
 
     def _get_entry_link(self, entry) -> Optional[str]:
-        return entry.get('link', None)
+        return self._normalize_telegram_link(entry.get('link', None))
 
     def _get_entry_title(self, entry):
         if hasattr(entry, 'title_detail') and entry.title_detail:
